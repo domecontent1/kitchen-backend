@@ -1,5 +1,4 @@
-# app/schemas/dashboard.py
-
+# backend/app/schemas/dashboard.py
 from pydantic import BaseModel
 
 

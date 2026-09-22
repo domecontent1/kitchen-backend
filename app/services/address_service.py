@@ -1,4 +1,5 @@
-# app/services/address_service.py
+
+# backend/app/services/address_service.py
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -7,39 +8,31 @@ from app.core.database import database
 
 
 class AddressService:
-
-    async def create_address(
-        self,
-        user_id: str,
-        address_data: dict
-    ):
-
+    async def create_address(self, user_id: str, address_data: dict):
         now = datetime.now(timezone.utc)
 
-        address_data["user_id"] = ObjectId(user_id)
-        address_data["active"] = True
-        address_data["created_at"] = now
-        address_data["updated_at"] = now
+        address_data = {
+            "label": address_data["label"].strip(),
+            "address_line": address_data["address_line"].strip(),
+            "landmark": address_data["landmark"].strip() if address_data.get("landmark") else None,
+            "town": address_data["town"].strip(),
+            "pincode": address_data["pincode"].strip(),
+            "user_id": ObjectId(user_id),
+            "active": True,
+            "created_at": now,
+            "updated_at": now
+        }
 
-        result = await database["addresses"].insert_one(
-            address_data
-        )
+        result = await database["addresses"].insert_one(address_data)
+        return await database["addresses"].find_one({"_id": result.inserted_id})
 
-        return await database["addresses"].find_one(
-            {"_id": result.inserted_id}
-        )
-
-    async def get_user_addresses(
-        self,
-        user_id: str
-    ):
-
+    async def get_user_addresses(self, user_id: str):
         cursor = database["addresses"].find(
             {
                 "user_id": ObjectId(user_id),
                 "active": True
             }
-        )
+        ).sort("created_at", -1)
 
         addresses = []
 
@@ -48,12 +41,7 @@ class AddressService:
 
         return addresses
 
-    async def get_address(
-        self,
-        address_id: str,
-        user_id: str
-    ):
-
+    async def get_address(self, address_id: str, user_id: str):
         if not ObjectId.is_valid(address_id):
             return None
 
@@ -65,19 +53,18 @@ class AddressService:
             }
         )
 
-    async def update_address(
-        self,
-        address_id: str,
-        user_id: str,
-        address_data: dict
-    ):
-
+    async def update_address(self, address_id: str, user_id: str, address_data: dict):
         if not ObjectId.is_valid(address_id):
             return None
 
-        address_data["updated_at"] = (
-            datetime.now(timezone.utc)
-        )
+        update_data = {
+            "label": address_data["label"].strip(),
+            "address_line": address_data["address_line"].strip(),
+            "landmark": address_data["landmark"].strip() if address_data.get("landmark") else None,
+            "town": address_data["town"].strip(),
+            "pincode": address_data["pincode"].strip(),
+            "updated_at": datetime.now(timezone.utc)
+        }
 
         result = await database["addresses"].update_one(
             {
@@ -85,9 +72,7 @@ class AddressService:
                 "user_id": ObjectId(user_id),
                 "active": True
             },
-            {
-                "$set": address_data
-            }
+            {"$set": update_data}
         )
 
         if result.matched_count == 0:
@@ -96,16 +81,12 @@ class AddressService:
         return await database["addresses"].find_one(
             {
                 "_id": ObjectId(address_id),
-                "user_id": ObjectId(user_id)
+                "user_id": ObjectId(user_id),
+                "active": True
             }
         )
 
-    async def deactivate_address(
-        self,
-        address_id: str,
-        user_id: str
-    ):
-
+    async def deactivate_address(self, address_id: str, user_id: str):
         if not ObjectId.is_valid(address_id):
             return 0
 

@@ -1,8 +1,10 @@
-# app/schemas/order.py
+# backend/app/schemas/order.py
 from datetime import date, time
-from typing import Literal
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.core.enums import OrderStatus
 
 
 class OrderItemCreate(BaseModel):
@@ -20,7 +22,7 @@ class OrderCreate(BaseModel):
     address_id: str
     delivery_date: date
     delivery_slot: DeliverySlot
-    notes: str | None = Field(default=None, max_length=500)
+    notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class OrderItemResponse(BaseModel):
@@ -34,14 +36,9 @@ class OrderItemResponse(BaseModel):
 class DeliveryAddressResponse(BaseModel):
     label: str
     address_line: str
-    landmark: str | None
+    landmark: Optional[str]
     town: str
     pincode: str
-
-
-class OrderCustomerResponse(BaseModel):
-    name: str
-    phone: str
 
 
 class CustomerResponse(BaseModel):
@@ -58,16 +55,28 @@ class OrderResponse(BaseModel):
     delivery_slot: DeliverySlot
     delivery_address: DeliveryAddressResponse
     total_amount: float
-    status: str
-    notes: str | None
+    status: OrderStatus
+    notes: Optional[str]
     created_at: str
     updated_at: str
 
 
+class AdminOrderListResponse(BaseModel):
+    items: list[OrderResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class OrderStatusUpdate(BaseModel):
-    status: Literal[
-        "PREPARING",
-        "OUT_FOR_DELIVERY",
-        "DELIVERED",
-        "CANCELLED"
-    ]
+    status: OrderStatus
+
+
+class AdminOrderStatusCounts(BaseModel):
+    ALL: int
+    PLACED: int
+    PREPARING: int
+    OUT_FOR_DELIVERY: int
+    DELIVERED: int
+    CANCELLED: int

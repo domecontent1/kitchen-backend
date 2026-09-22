@@ -1,36 +1,20 @@
+# backend/app/routes/auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.core.security import (
-    create_access_token,
-    verify_password
-)
-
-from app.schemas.user import (
-    TokenResponse,
-    UserLogin,
-    UserRegister,
-    UserResponse
-)
-
+from app.core.security import create_access_token, verify_password
+from app.schemas.user import TokenResponse, UserLogin, UserRegister, UserResponse
 from app.services.user_service import user_service
 
 
-router = APIRouter(
-    prefix="/auth",
-    tags=["Authentication"]
-)
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post(
-    "/register",
-    response_model=UserResponse
-)
+@router.post("/register", response_model=UserResponse)
 async def register_user(user: UserRegister):
+    phone = user.phone.strip()
 
-    existing_user = await user_service.get_user_by_phone(
-        user.phone
-    )
+    existing_user = await user_service.get_user_by_phone(phone)
 
     if existing_user is not None:
         raise HTTPException(
@@ -39,8 +23,8 @@ async def register_user(user: UserRegister):
         )
 
     created_user = await user_service.create_customer(
-        name=user.name,
-        phone=user.phone,
+        name=user.name.strip(),
+        phone=phone,
         password=user.password
     )
 
@@ -53,15 +37,11 @@ async def register_user(user: UserRegister):
     }
 
 
-@router.post(
-    "/login",
-    response_model=TokenResponse
-)
+@router.post("/login", response_model=TokenResponse)
 async def login_user(user: UserLogin):
+    phone = user.phone.strip()
 
-    existing_user = await user_service.get_user_by_phone(
-        user.phone
-    )
+    existing_user = await user_service.get_user_by_phone(phone)
 
     if existing_user is None:
         raise HTTPException(
@@ -98,17 +78,13 @@ async def login_user(user: UserLogin):
     }
 
 
-@router.post(
-    "/token",
-    include_in_schema=False
-)
+@router.post("/token", include_in_schema=False)
 async def login_for_swagger(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
+    phone = form_data.username.strip()
 
-    existing_user = await user_service.get_user_by_phone(
-        form_data.username
-    )
+    existing_user = await user_service.get_user_by_phone(phone)
 
     if existing_user is None:
         raise HTTPException(

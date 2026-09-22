@@ -1,6 +1,8 @@
+# backend/app/schemas/user.py
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class UserRole(str, Enum):
@@ -8,31 +10,28 @@ class UserRole(str, Enum):
     ADMIN = "ADMIN"
 
 
+PhoneNumber = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, pattern=r"^[6-9]\d{9}$")]
+
+Password = Annotated[
+    str,
+    StringConstraints(min_length=8, max_length=128)]
+
+
 class UserRegister(BaseModel):
-    name: str = Field(
-        min_length=2,
-        max_length=100
-    )
-
-    phone: str = Field(
-        pattern=r"^[6-9]\d{9}$"
-    )
-
-    password: str = Field(
-        min_length=8,
-        max_length=128
-    )
+    name: str = Field(min_length=2, max_length=100)
+    phone: PhoneNumber
+    password: Password
 
 
 class UserLogin(BaseModel):
-    phone: str = Field(
-        pattern=r"^[6-9]\d{9}$"
-    )
+    phone: PhoneNumber
+    password: Password
 
-    password: str = Field(
-        min_length=8,
-        max_length=128
-    )
+
+class UserProfileUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
 
 
 class UserResponse(BaseModel):
@@ -47,3 +46,39 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     role: UserRole
+
+
+class AdminCustomerResponse(BaseModel):
+    id: str
+    name: str
+    phone: str
+    active: bool
+    order_count: int
+    total_spent: float
+
+
+class AdminCustomerListResponse(BaseModel):
+    items: list[AdminCustomerResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class AdminCustomerOrderResponse(BaseModel):
+    id: str
+    status: str
+    total_amount: float
+    delivery_date: str
+    delivery_slot: dict
+    created_at: str
+
+
+class AdminCustomerDetailsResponse(BaseModel):
+    id: str
+    name: str
+    phone: str
+    active: bool
+    order_count: int
+    total_spent: float
+    orders: list[AdminCustomerOrderResponse]
