@@ -31,7 +31,11 @@ class UserLogin(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
+    name: Annotated[str, StringConstraints(
+        strip_whitespace=True,
+        min_length=2,
+        max_length=100,
+    )]
 
 
 class UserResponse(BaseModel):

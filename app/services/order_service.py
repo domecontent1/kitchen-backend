@@ -1,6 +1,6 @@
 # backend/app/services/order_service.py
 import re
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 from typing import Optional
 
 from bson import ObjectId
@@ -14,6 +14,41 @@ from app.services.notification_service import notification_service
 
 
 class OrderService:
+    async def _notify_order_placed(self, order: dict):
+        await notification_service.create_notification(
+            user_id=str(order["customer_id"]),
+            order_id=str(order["_id"]),
+            title="Order Placed",
+            message="We have received your order.",
+            notification_type="ORDER_STATUS"
+        )
+
+    @staticmethod
+    def _status_notification_message(status: OrderStatus) -> Optional[str]:
+        return {
+            OrderStatus.PREPARING: "Your order is now being prepared.",
+            OrderStatus.OUT_FOR_DELIVERY: "Your order is out for delivery.",
+            OrderStatus.DELIVERED: "Your order has been delivered.",
+            OrderStatus.CANCELLED: "Your order has been cancelled."
+        }.get(status)
+
+    async def _notify_status_change(
+        self,
+        order: dict,
+        status: OrderStatus
+    ):
+        message = self._status_notification_message(status)
+        if message is None:
+            return
+
+        await notification_service.create_notification(
+            user_id=str(order["customer_id"]),
+            order_id=str(order["_id"]),
+            title=f"Order {status.value.replace('_', ' ').title()}",
+            message=message,
+            notification_type="ORDER_STATUS"
+        )
+
     async def create_order(
         self,
         customer_id: str,
@@ -30,6 +65,7 @@ class OrderService:
         })
 
         if existing_order is not None:
+            await self._notify_order_placed(existing_order)
             return existing_order
 
         customer = await database["users"].find_one({"_id": customer_object_id})
@@ -156,13 +192,19 @@ class OrderService:
             })
 
             if existing_order is not None:
+                await self._notify_order_placed(existing_order)
                 return existing_order
 
             raise
 
-        return await database["orders"].find_one({
+        created_order = await database["orders"].find_one({
             "_id": result.inserted_id
         })
+
+        if created_order:
+            await self._notify_order_placed(created_order)
+
+        return created_order
 
     async def get_customer_orders(self, customer_id: str):
         if not ObjectId.is_valid(customer_id):
@@ -205,7 +247,8 @@ class OrderService:
         page: int = 1,
         page_size: int = 20,
         status: Optional[OrderStatus] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        delivery_date: Optional[date] = None
     ):
         if page < 1:
             raise HTTPException(status_code=400,
@@ -219,6 +262,17 @@ class OrderService:
 
         if status:
             query["status"] = status.value
+
+        if delivery_date:
+            start_date = datetime.combine(delivery_date, time.min)
+            end_date = datetime.combine(
+                delivery_date + timedelta(days=1),
+                time.min
+            )
+            query["delivery_date"] = {
+                "$gte": start_date,
+                "$lt": end_date
+            }
 
         if search:
             search = search.strip()
@@ -307,6 +361,24 @@ class OrderService:
 
         current_status = OrderStatus(order["status"])
 
+        if new_status == current_status:
+            message = self._status_notification_message(new_status)
+            if message is not None:
+                notification_title = (
+                    f"Order {new_status.value.replace('_', ' ').title()}"
+                )
+                existing_notification = (
+                    await notification_service.find_order_notification(
+                        user_id=str(order["customer_id"]),
+                        order_id=str(order["_id"]),
+                        title=notification_title,
+                        notification_type="ORDER_STATUS"
+                    )
+                )
+                if existing_notification is None:
+                    await self._notify_status_change(order, new_status)
+                    return order
+
         allowed_transitions = {
             OrderStatus.PLACED: [
                 OrderStatus.PREPARING,
@@ -333,7 +405,10 @@ class OrderService:
             )
 
         result = await database["orders"].update_one(
-            {"_id": ObjectId(order_id)},
+            {
+                "_id": ObjectId(order_id),
+                "status": current_status.value
+            },
             {
                 "$set": {
                     "status": new_status.value,
@@ -343,7 +418,10 @@ class OrderService:
         )
 
         if result.matched_count == 0:
-            return None
+            raise HTTPException(
+                status_code=409,
+                detail="Order status changed before the update. Refresh and try again."
+            )
 
         updated_order = await database["orders"].find_one({
             "_id": ObjectId(order_id)
@@ -351,24 +429,7 @@ class OrderService:
 
         if updated_order:
             await self.ensure_customer_snapshot(updated_order)
-
-            notification_messages = {
-                OrderStatus.PREPARING: "Your order is now being prepared.",
-                OrderStatus.OUT_FOR_DELIVERY: "Your order is out for delivery.",
-                OrderStatus.DELIVERED: "Your order has been delivered.",
-                OrderStatus.CANCELLED: "Your order has been cancelled."
-            }
-
-            message = notification_messages.get(new_status)
-
-            if message:
-                await notification_service.create_notification(
-                    user_id=str(updated_order["customer_id"]),
-                    order_id=str(updated_order["_id"]),
-                    title=f"Order {new_status.value.replace('_', ' ').title()}",
-                    message=message,
-                    notification_type="ORDER_STATUS"
-                )
+            await self._notify_status_change(updated_order, new_status)
 
         return updated_order
 
@@ -391,6 +452,19 @@ class OrderService:
         if order is None:
             return None
 
+        if order["status"] == OrderStatus.CANCELLED.value:
+            existing_notification = (
+                await notification_service.find_order_notification(
+                    user_id=str(order["customer_id"]),
+                    order_id=str(order["_id"]),
+                    title="Order Cancelled",
+                    notification_type="ORDER_STATUS"
+                )
+            )
+            if existing_notification is None:
+                await self._notify_status_change(order, OrderStatus.CANCELLED)
+                return order
+
         if order["status"] != OrderStatus.PLACED.value:
             raise HTTPException(status_code=400,
                 detail="Only placed orders can be cancelled")
@@ -398,7 +472,8 @@ class OrderService:
         result = await database["orders"].update_one(
             {
                 "_id": ObjectId(order_id),
-                "customer_id": ObjectId(customer_id)
+                "customer_id": ObjectId(customer_id),
+                "status": OrderStatus.PLACED.value
             },
             {
                 "$set": {
@@ -409,7 +484,10 @@ class OrderService:
         )
 
         if result.matched_count == 0:
-            return None
+            raise HTTPException(
+                status_code=409,
+                detail="Order status changed before cancellation. Refresh the order and try again."
+            )
 
         cancelled_order = await database["orders"].find_one({
             "_id": ObjectId(order_id)
@@ -417,6 +495,10 @@ class OrderService:
 
         if cancelled_order:
             await self.ensure_customer_snapshot(cancelled_order)
+            await self._notify_status_change(
+                cancelled_order,
+                OrderStatus.CANCELLED
+            )
 
         return cancelled_order
 
@@ -463,6 +545,57 @@ class OrderService:
             await self.ensure_customer_snapshot(order)
 
         return order
+
+
+
+    async def get_admin_orders_for_date(self, delivery_date: date):
+        start_date = datetime.combine(delivery_date, time.min)
+        end_date = datetime.combine(
+            delivery_date + timedelta(days=1),
+            time.min
+        )
+
+        query = {
+            "delivery_date": {
+                "$gte": start_date,
+                "$lt": end_date
+            }
+        }
+
+        collection = database["orders"]
+        cursor = collection.find(query).sort([
+            ("delivery_slot.start", 1),
+            ("created_at", 1)
+        ])
+
+        orders = []
+        async for order in cursor:
+            await self.ensure_customer_snapshot(order)
+            orders.append(order)
+
+        status_counts = {
+            status.value.lower() + "_orders": sum(
+                1 for order in orders if order["status"] == status.value
+            )
+            for status in OrderStatus
+        }
+
+        total_revenue = sum(
+            float(order.get("total_amount", 0))
+            for order in orders
+            if order["status"] != OrderStatus.CANCELLED.value
+        )
+
+        return {
+            "items": orders,
+            "total_orders": len(orders),
+            "placed_orders": status_counts["placed_orders"],
+            "preparing_orders": status_counts["preparing_orders"],
+            "out_for_delivery_orders": status_counts["out_for_delivery_orders"],
+            "delivered_orders": status_counts["delivered_orders"],
+            "cancelled_orders": status_counts["cancelled_orders"],
+            "total_revenue": total_revenue
+        }
 
     async def get_admin_order_status_counts(self):
         collection = database["orders"]

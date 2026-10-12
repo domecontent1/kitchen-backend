@@ -1,11 +1,14 @@
 # D:\Github\kitchen\backend\app\services\dashboard_service.py
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.core.database import database
 from app.core.enums import OrderStatus
 
 
 class DashboardService:
+    BUSINESS_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
     async def get_dashboard(self) -> dict:
         orders = database["orders"]
 
@@ -36,24 +39,27 @@ class DashboardService:
 
         total_revenue = revenue_result[0]["total"] if revenue_result else 0
 
-        now = datetime.now(timezone.utc)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
+        now = datetime.now(self.BUSINESS_TIMEZONE)
+        local_start_of_day = datetime.combine(
+            now.date(), time.min, tzinfo=self.BUSINESS_TIMEZONE
+        )
+        local_start_of_next_day = local_start_of_day + timedelta(days=1)
+        start_of_day = local_start_of_day.astimezone(timezone.utc)
+        start_of_next_day = local_start_of_next_day.astimezone(timezone.utc)
+
+        today_created_at = {
+            "$gte": start_of_day,
+            "$lt": start_of_next_day
+        }
 
         today_orders = await orders.count_documents({
-            "created_at": {
-                "$gte": start_of_day,
-                "$lte": end_of_day
-            }
+            "created_at": today_created_at
         })
 
         today_revenue_cursor = await orders.aggregate([
             {
                 "$match": {
-                    "created_at": {
-                        "$gte": start_of_day,
-                        "$lte": end_of_day
-                    },
+                    "created_at": today_created_at,
                     "status": {"$ne": OrderStatus.CANCELLED.value}
                 }
             },

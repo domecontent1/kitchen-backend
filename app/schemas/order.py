@@ -80,3 +80,14 @@ class AdminOrderStatusCounts(BaseModel):
     OUT_FOR_DELIVERY: int
     DELIVERED: int
     CANCELLED: int
+
+
+class AdminDailyOrdersResponse(BaseModel):
+    items: list[OrderResponse]
+    total_orders: int
+    placed_orders: int
+    preparing_orders: int
+    out_for_delivery_orders: int
+    delivered_orders: int
+    cancelled_orders: int
+    total_revenue: float

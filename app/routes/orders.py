@@ -1,3 +1,5 @@
+# backend/app/routes/orders.py
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -5,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from app.core.auth import get_current_user, require_admin
 from app.core.enums import OrderStatus
 from app.schemas.order import (
+    AdminDailyOrdersResponse,
     AdminOrderListResponse,
     AdminOrderStatusCounts,
     OrderCreate,
@@ -70,13 +73,15 @@ async def get_admin_orders(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[OrderStatus] = Query(None),
     search: Optional[str] = Query(None),
+    delivery_date: Optional[date] = Query(None),
     current_user: dict = Depends(require_admin)
 ):
     result = await order_service.get_admin_orders(
         page=page,
         page_size=page_size,
         status=status,
-        search=search
+        search=search,
+        delivery_date=delivery_date
     )
 
     return {
@@ -87,6 +92,19 @@ async def get_admin_orders(
         "total_pages": result["total_pages"]
     }
 
+
+@router.get("/admin/today", response_model=AdminDailyOrdersResponse)
+async def get_admin_orders_for_date(
+    delivery_date: date = Query(..., alias="date"),
+    current_user: dict = Depends(require_admin)
+):
+    result = await order_service.get_admin_orders_for_date(
+        delivery_date=delivery_date
+    )
+    return {
+        **result,
+        "items": [order_to_response(order) for order in result["items"]]
+    }
 
 @router.get("/admin/status-counts", response_model=AdminOrderStatusCounts)
 async def get_admin_order_status_counts(
